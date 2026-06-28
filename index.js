@@ -138,4 +138,6 @@ client.once('ready', (c) => {
   startTournamentReminders(c);
 });
 
-client.login(process.env.BOT_TOKEN);
+const token = process.env.BOT_TOKEN;
+console.log(`[boot] BOT_TOKEN present: ${!!token}, length: ${token?.length ?? 0}, starts: ${token?.slice(0,4) ?? 'N/A'}`);
+client.login(token);
