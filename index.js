@@ -1,6 +1,19 @@
 import 'dotenv/config';
 import { Client, GatewayIntentBits, Collection } from 'discord.js';
+
+// Prevent any unhandled promise rejection from crashing the process.
+process.on('unhandledRejection', (err) => {
+  console.error('[process] Unhandled rejection (bot kept alive):', err?.message ?? err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[process] Uncaught exception (bot kept alive):', err?.message ?? err);
+});
 import express from 'express';
+
+import { syncClient }                          from './sync/client.js';
+import { syncDiscordRolesForUser,
+         fetchAndSyncForDiscordId }            from './sync/syncRoles.js';
+import { removeUserRoles }                     from './utils/wpApi.js';
 
 import * as readyEvent           from './events/ready.js';
 import * as interactionEvent     from './events/interactionCreate.js';
@@ -123,6 +136,22 @@ app.post('/webhook/config', async (req, res) => {
   }
 });
 
+app.post('/webhook/role-sync', async (req, res) => {
+  try {
+    const { discord_id, discord_role_ids } = req.body;
+    if (!discord_id) return res.status(400).json({ error: 'discord_id required.' });
+
+    const guild = syncClient.guilds.cache.get(process.env.GUILD_ID);
+    if (!guild) return res.status(503).json({ error: 'Sync bot not connected to guild.' });
+
+    await syncDiscordRolesForUser(guild, discord_id, discord_role_ids ?? []);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[webhook/role-sync]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', bot: client.user?.tag ?? 'not ready' });
 });
@@ -138,6 +167,37 @@ client.once('ready', (c) => {
   startTournamentReminders(c);
 });
 
-const token = process.env.BOT_TOKEN;
-console.log(`[boot] BOT_TOKEN present: ${!!token}, length: ${token?.length ?? 0}, starts: ${token?.slice(0,4) ?? 'N/A'}`);
-client.login(token);
+// ── Bot 1: role-sync client ────────────────────────────────────────────────────
+
+syncClient.on('guildMemberAdd', async (member) => {
+  if (member.guild.id !== process.env.GUILD_ID) return;
+  await fetchAndSyncForDiscordId(member.guild, member.user.id);
+});
+
+syncClient.on('guildMemberUpdate', async (oldMember, newMember) => {
+  if (newMember.guild.id !== process.env.GUILD_ID) return;
+  const removedIds = oldMember.roles.cache
+    .filter((r) => !newMember.roles.cache.has(r.id))
+    .map((r) => r.id);
+  if (!removedIds.length) return;
+  try {
+    const { data } = await removeUserRoles(newMember.user.id, removedIds);
+    if (data?.removed?.length) {
+      console.log(`[sync] Removed WP roles [${data.removed.join(', ')}] from ${newMember.user.tag}`);
+    }
+  } catch (err) {
+    console.error(`[sync] Failed reverse sync for ${newMember.user.tag}:`, err.message);
+  }
+});
+
+syncClient.once('ready', (c) => {
+  console.log(`[sync-bot] Logged in as ${c.user.tag}`);
+});
+
+client.login(process.env.BOT_TOKEN);
+
+if (process.env.BOT1_TOKEN) {
+  syncClient.login(process.env.BOT1_TOKEN);
+} else {
+  console.warn('[sync-bot] BOT1_TOKEN not set — role-sync bot disabled.');
+}

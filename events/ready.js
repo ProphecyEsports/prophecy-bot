@@ -15,6 +15,9 @@ export async function execute(client) {
 
   console.log(`[ready] Prophecy Bot online — connected to ${guild?.name ?? 'unknown guild'}`);
   console.log(`[ready] Logged in as ${client.user.tag}`);
+  console.log(`[ready] CLIENT_ID: ${process.env.CLIENT_ID ? process.env.CLIENT_ID : '⚠ NOT SET'}`);
+  console.log(`[ready] GUILD_ID:  ${process.env.GUILD_ID  ? process.env.GUILD_ID  : '⚠ NOT SET'}`);
+  console.log(`[ready] WP_API_URL: ${process.env.WP_API_URL ?? '⚠ NOT SET'}`);
 
   // Register this server with WordPress so the admin panel shows bot controls.
   if (guild) {
@@ -42,8 +45,15 @@ export async function execute(client) {
     console.log('[ready] Membership roles verified.');
   }
 
-  await registerSlashCommands();
-  console.log('[ready] Slash commands registered.');
+  try {
+    await registerSlashCommands();
+    console.log('[ready] Slash commands registered.');
+  } catch (err) {
+    console.error('[ready] ⚠ Slash command registration failed (bot will still run):', err.message);
+    if (!process.env.CLIENT_ID) {
+      console.error('[ready] ➜ CLIENT_ID is not set in Railway — add it in the Variables tab.');
+    }
+  }
 }
 
 async function registerSlashCommands() {
